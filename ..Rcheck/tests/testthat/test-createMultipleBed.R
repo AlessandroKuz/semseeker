@@ -1,11 +1,8 @@
 test_that("create_multiple_bed", {
 
-  library(stringi)
-  tmp <- tempdir()
-  tempFolder <- paste(tmp,"/semseeker/",stringi::stri_rand_strings(1, 7, pattern = "[A-Za-z0-9]"),sep="")
-  envir <- init_env(tempFolder, parallel_strategy = "sequential")
+  ssEnv <- init_env(tempFolder, parallel_strategy = "sequential")
 
-  nitem <- 1e3
+  nitem <- 1e4
   nsamples <- 5
   methylation_data <- rnorm(nitem*nsamples,mean = 0.5, sd = 0.7)
   methylation_data <- as.data.frame(matrix(methylation_data,nitem,nsamples))
@@ -27,36 +24,35 @@ test_that("create_multiple_bed", {
   Sample_Group <- rep("Control",nsamples)
   sample_sheet <- data.frame(Sample_Group, Sample_ID)
 
-  sp <- analize_population(envir,
-                           methylation_data=methylation_data,
-                           sliding_window_size = 11,
-                           beta_superior_thresholds = beta_superior_thresholds,
-                           beta_inferior_thresholds = beta_inferior_thresholds,
-                           sample_sheet = sample_sheet,
-                           beta_medians = beta_superior_thresholds - beta_inferior_thresholds,
-                           bonferroni_threshold = 0.01,
-                           probe_features = probe_features
+  sp <- analyze_population(methylation_data=methylation_data,
+    sliding_window_size = 11,
+    sliding_window_size = sliding_window_size,
+    beta_thresholds = beta_thresholds,
+    sample_sheet = mySampleSheet,
+    bonferroni_threshold = bonferroni_threshold,
+    probe_features = probe_features,
+    bonferroni_threshold = 0.01,
   )
 
   sp$Sample_Group <- sample_sheet$Sample_Group
-  create_multiple_bed(envir, sample_sheet)
+  create_multiple_bed( sample_sheet)
 
-  tempresult_folder <-dir_check_and_create(envir$result_folderData,c("Control","MUTATIONS_BOTH"))
+  tempresult_folder <-dir_check_and_create(ssEnv$result_folderData,c("Control","MUTATIONS_BOTH"))
   fileToRead <- file_path_build(tempresult_folder, c("MULTIPLE", "MUTATIONS" ,"BOTH" ), "fst")
   # localFileRes_both <- read.table(fileToRead, sep="\t")
   localFileRes_both <- fst::read_fst(fileToRead)
 
-  expect_true(nrow(localFileRes_both)>0)
+  testthat::expect_true(nrow(localFileRes_both)>0)
 
-  # tempresult_folder <-dir_check_and_create(envir$result_folderData,c("Control","MUTATIONS_HYPO"))
+  # tempresult_folder <-dir_check_and_create(ssEnv$result_folderData,c("Control","MUTATIONS_HYPO"))
   # fileToRead <- file_path_build(tempresult_folder, c("MULTIPLE", "MUTATIONS" ,"HYPO" ), "fst")
   # localFileRes_hypo <- read.table(fileToRead, sep="\t")
   #
-  # tempresult_folder <-dir_check_and_create(envir$result_folderData,c("Control","MUTATIONS_HYPER"))
+  # tempresult_folder <-dir_check_and_create(ssEnv$result_folderData,c("Control","MUTATIONS_HYPER"))
   # fileToRead <- file_path_build(tempresult_folder, c("MULTIPLE", "MUTATIONS" ,"HYPER" ), "fst")
   # localFileRes_hyper <- read.table(fileToRead, sep="\t")
 
-  # expect_true(nrow(localFileRes_hyper)>0 | nrow(localFileRes_hypo)>0 | nrow(localFileRes_both)>0)
+  # testthat::expect_true(nrow(localFileRes_hyper)>0 | nrow(localFileRes_hypo)>0 | nrow(localFileRes_both)>0)
 
 
 })

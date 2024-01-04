@@ -5,7 +5,6 @@
 \title{delta_single_sample}
 \usage{
 delta_single_sample(
-  envir,
   values,
   high_thresholds,
   low_thresholds,
@@ -15,8 +14,6 @@ delta_single_sample(
 )
 }
 \arguments{
-\item{envir}{environment to get globals}
-
 \item{values}{values of methylation}
 
 \item{high_thresholds}{highest threshold to use for comparison}
@@ -27,7 +24,7 @@ delta_single_sample(
 
 \item{beta_medians}{median to use for calculation}
 
-\item{probe_features}{genomic position of probes}
+\item{probe_features}{genomic position of probe_features}
 }
 \value{
 summary detail about the analysis

@@ -5,7 +5,6 @@
 \title{analyze_single_sample}
 \usage{
 analyze_single_sample(
-  envir,
   values,
   sliding_window_size,
   thresholds,
@@ -16,8 +15,6 @@ analyze_single_sample(
 )
 }
 \arguments{
-\item{envir}{environment to get globals}
-
 \item{values}{values of methylation}
 
 \item{sliding_window_size}{size of window sliding to calculate hypergeometric}
@@ -30,10 +27,10 @@ analyze_single_sample(
 
 \item{bonferroni_threshold}{bonferroni threshold to validate pValue}
 
-\item{probe_features}{probes details to be used}
+\item{probe_features}{probe_features details to be used}
 }
 \value{
-list of lesion count  and probes count
+list of lesion count  and probe_features count
 }
 \description{
 analyze_single_sample

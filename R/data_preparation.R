@@ -8,15 +8,23 @@
 #' @param dototal boolean to calculate the total burden test/regression
 #' @param covariates vector of covariates to be found in the sample sheet
 #' @param depth_analysis 1 only sample, 2 chr, 3 alle genomic areas
-#' @param envir environment infos
 #'
-data_preparation <- function(family_test,transformation,tempDataFrame, independent_variable, g_start, dototal, covariates, depth_analysis, envir)
+data_preparation <- function(family_test,transformation,tempDataFrame, independent_variable, g_start, dototal, covariates, depth_analysis)
 {
+
+  ssEnv <- get_session_info()
+
   transformation <- as.character(transformation)
   originalDataFrame <- tempDataFrame
+  tempDataFrame <- as.data.frame(sapply(tempDataFrame, as.numeric))
 
   independent_variable1stLevel <- NA
   independent_variable2ndLevel <- NA
+  test_factor <- as.factor(tempDataFrame[, independent_variable])
+  if(length(levels(test_factor))<4)
+  {
+    tempDataFrame[, independent_variable] <- as.factor(tempDataFrame[, independent_variable])
+    }
   if(is.factor(tempDataFrame[, independent_variable]))
   {
     independent_variable1stLevel <- levels(tempDataFrame[, independent_variable])[1]
@@ -24,6 +32,7 @@ data_preparation <- function(family_test,transformation,tempDataFrame, independe
   }
 
   df_head <- tempDataFrame[,1:(g_start-1)]
+
   burden_values <- sapply(tempDataFrame[,g_start:ncol(tempDataFrame)], as.numeric)
 
 
@@ -43,7 +52,7 @@ data_preparation <- function(family_test,transformation,tempDataFrame, independe
     }
   }
 
-  if(family_test != "poisson")
+  if(family_test == "log")
     burden_values <- burden_values + 0.001
 
   transformation <- as.character(transformation)
@@ -129,14 +138,14 @@ data_preparation <- function(family_test,transformation,tempDataFrame, independe
 
   tempDataFrame <- data.frame(df_head, burden_values)
   if(ncol(tempDataFrame)!=length(df_colnames))
-    browser()
+    stop("ERROR: I'm stopping here data are not the same size, file a bug!")
 
   colnames(tempDataFrame) <- df_colnames
   # after the transformation some data could be missed
   lost_cols <- colSums(apply(tempDataFrame,2,is.nan))!=0
   lostDataFrame <-  colnames(tempDataFrame)[lost_cols]
   if(sum(lost_cols)!=0)
-    utils::write.csv2(lostDataFrame, file.path(envir$logFolder,paste("lost_data_",transformation,"_",stringi::stri_rand_strings(1, 12, pattern = "[A-Za-z0-9]"),".log", sep="")))
+    utils::write.csv2(lostDataFrame, file.path(ssEnv$session_folder,paste("lost_data_",transformation,"_",stringi::stri_rand_strings(1, 12, pattern = "[A-Za-z0-9]"),".log", sep="")))
 
   #  we want to preserve the NA in the independent variables to be removed by the models
   tempDataFrame[apply(tempDataFrame,2,is.nan)] <- 0

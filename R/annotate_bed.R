@@ -1,106 +1,101 @@
-#' takes a bed and its location (build with the details of popuationa nd genomic area)
-#' and annoate with detail about genomic area
-#' @param envir semseekere working infos
-#' @param populations vector of population to cycle with to build the folder path
-#' @param figures vector of hyper /hypo to use to build the folder path
-#' @param anomalies vector of lesions/mutations to use to build the folder path
-#' @param groups vector of genomic area to cycle and group the annotated data
-#' @param probes_prefix prefix to use to get the annotated probes dataset
-#' @param columnLabel label of the column of the genomic area gene, island ,dmr etc..
-#' @param groupingColumnLabel label of the column of the genomic sub area body, tss1500
+#' @title create an annotated file for each marker, figure, area and subarea, each file has all the sample_groups used to calculate epimutation
 #'
-#' @return original bed with genomic area infos
+#' @return nothing
 #' @importFrom doRNG %dorng%
 
-annotate_bed <- function (
-    envir,
-    populations ,
-    figures ,
-    anomalies ,
-    groups ,
-    probes_prefix ,
-    columnLabel ,
-    groupingColumnLabel)
+annotate_bed <- function ()
 {
-
+  ssEnv <- get_session_info()
+  # area and subarea are defined using the filename
   i <- 0
-  final_bed <- NULL
-  bedFileName <- file_path_build(envir$result_folderData , c(columnLabel, "ANNOTATED"),"fst")
+  dest_folder <- dir_check_and_create(ssEnv$result_folderData,subFolders = c("Annotated"))
+  localKeys <-ssEnv$keys_areas_subareas_markers_figures
+  message("INFO: ", Sys.time(), " Annotating genomic area.")
 
-  if(file.exists(bedFileName))
-  {
-    if(file.info(bedFileName)$size < 10)
+  total_cycles <- nrow(localKeys)* length(ssEnv$keys_sample_groups)
+  if(ssEnv$showprogress)
+    progress_bar <- progressr::progressor(along = 1:total_cycles)
+  else
+    progress_bar <- ""
+
+  variables_to_export <- c("ssEnv", "dir_check_and_create", "read_multiple_bed", "subarea",
+                            "progress_bar","progression_index", "progression", "progressor_uuid",
+                            "owner_session_uuid", "trace","probe_features_get","dest_folder", "localKeys",
+                            "file_path_build")
+
+  # for(i in 1:nrow(localKeys))
+  foreach::foreach(i=1:nrow(localKeys), .export = variables_to_export) %dorng%
     {
-      final_bed <- NULL
-      message("WARNING: ", Sys.time(), " Given up file:", final_bed, " is empty!")
+      # i <- 1
+      for (g in 1:length(ssEnv$keys_sample_groups))
+      {
+        # g <- 1
+        marker <- as.character(localKeys[i,"MARKER"])
+        sample_group <- as.character(ssEnv$keys_sample_groups[g,"SAMPLE_GROUP"])
+        figure <- as.character(localKeys[i,"FIGURE"])
+        subarea <- as.character(localKeys[i,"SUBAREA"])
+        area <- as.character(localKeys[i,"AREA"])
+        area_subarea <- paste(area,"_", subarea, sep="")
+
+        bedFileName <- file_path_build(dest_folder , c(marker, figure, area,subarea, "Annotated"),"fst")
+        if (file.exists(bedFileName))
+          next
+
+        probe_features <- probe_features_get(area_subarea)
+        probe_features$CHR <- as.factor(paste0("chr", probe_features$CHR))
+
+        # annotate file
+        dataToAnnotate <- read_multiple_bed(marker = marker ,sample_group =   sample_group, figure = figure)
+        if(is.null(dataToAnnotate))
+          next
+
+        if(sum(grepl("END", colnames(probe_features)))>0) #dplyr::inner_join
+          dataToAnnotate <- merge(dataToAnnotate, probe_features, by = c("CHR", "START","END"))
+        else
+          dataToAnnotate <- merge(dataToAnnotate, probe_features, by = c("CHR", "START"))
+
+        dataToAnnotate <-subset(dataToAnnotate, !is.na(eval(parse(text=area_subarea))))
+
+        if(nrow(dataToAnnotate)==0)
+          next
+        sourceDataColNames <- colnames(dataToAnnotate)
+        sourceDataColNames[which(sourceDataColNames==area_subarea)] <- "AREA"
+        colnames(dataToAnnotate) <- sourceDataColNames
+
+        dataToAnnotate$CHR <- as.factor(dataToAnnotate$CHR)
+
+        probe_features <- probe_features[(probe_features$CHR %in% unique((dataToAnnotate$CHR))), ]
+        droplevels(probe_features$CHR)
+        droplevels(dataToAnnotate$CHR)
+
+        colname_to_preserve <- !(colnames(dataToAnnotate) %in%  c("START","END","K27","K450","K850"))
+        dataToAnnotate <- unique(dataToAnnotate[, colname_to_preserve])
+
+        # dataToAnnotate
+
+        if(exists("final_bed"))
+          final_bed <- rbind(final_bed, dataToAnnotate)
+        else
+          final_bed <- dataToAnnotate
+
+        if(ssEnv$showprogress)
+          progress_bar(sprintf("Annotating multiple files."))
+      }
+
+
+      if(exists("final_bed"))
+      {
+        colname_to_preserve <- !(colnames(final_bed) %in%  c("START","END","K27","K450","K850"))
+        final_bed <- unique(final_bed[, colname_to_preserve])
+        final_bed <- as.data.frame(final_bed)
+        if(!plyr::empty(final_bed))
+        {
+          fst::write_fst( x = final_bed,path =  bedFileName, compress = T )
+          message("INFO: annotated file to ", bedFileName)
+        }
+      }
+
     }
-    else
-    {
-      # final_bed <- utils::read.table(bedFileName, stringsAsFactors = TRUE, sep="\t", header = TRUE)
-      final_bed <- fst::fst(path = bedFileName)
-      final_bed$VALUE = as.numeric(final_bed$VALUE)
-    }
-
-    final_bed_temp <- final_bed[final_bed$ANOMALY %in% anomalies & final_bed$FIGURE %in% figures,]
-    if(!plyr::empty(final_bed_temp))
-      return(final_bed_temp)
-    else
-      final_bed_temp <- as.data.frame(final_bed)
-  }
-
-  envir$keysLocal <-
-    expand.grid(
-      "POPULATION" = populations,
-      "FIGURE" = figures,
-      "ANOMALY" = anomalies,
-      "GROUP" = groups
-    )
-
-  message("INFO: ", Sys.time(), " Annotating genomic areas.")
-  if(envir$showprogress)
-    progress_bar <- progressr::progressor(along = 1:nrow(envir$keysLocal))
-
-  variables_to_export <- c("envir", "probes_prefix", "dir_check_and_create", "read_multiple_bed", "columnLabel",
-                           "groupingColumnLabel", "progress_bar","progression_index", "progression", "progressor_uuid", "owner_session_uuid", "trace","probes_get")
-
-  # for(i in 1:nrow(envir$keysLocal))
-  final_bed <- foreach::foreach(i=1:nrow(envir$keysLocal), .combine = rbind, .export = variables_to_export) %dorng%
-    {
-      anomal <- envir$keysLocal[i,"ANOMALY"]
-      pop <- envir$keysLocal[i,"POPULATION"]
-      fig <- envir$keysLocal[i,"FIGURE"]
-      grp <- envir$keysLocal[i,"GROUP"]
-
-      probes <- probes_get(probes_prefix, grp)
-
-      resFolder <- dir_check_and_create(envir$result_folderData,pop)
-      tempFile <- read_multiple_bed(envir=envir, anomalyLabel =  anomal, figureLable =  fig, probe_features =  probes,
-                                    columnLabel =  columnLabel, populationName = pop, groupingColumnLabel= groupingColumnLabel)
-      if(envir$showprogress)
-        progress_bar()
-      tempFile
-    }
-
-  # colname_to_preserve <- !(colnames(final_bed) %in%  c("START","END","PROBE"))
-  colname_to_preserve <- !(colnames(final_bed) %in%  c("START","END"))
-  final_bed <- final_bed[, colname_to_preserve]
-
-  if(exists("final_bed_temp"))
-    if(!plyr::empty(final_bed_temp))
-      final_bed <- rbind(final_bed, final_bed_temp)
-
-  if(exists("final_bed"))
-  {
-    final_bed <- as.data.frame(final_bed)
-    if(!plyr::empty(final_bed))
-      fst::write_fst( x = final_bed,path =  bedFileName, compress = T )
-  }
-
-  # utils::write.table(final_bed,bedFileName, row.names = FALSE, sep = "\t", col.names = TRUE)
-
-  # final_bed <- unique(final_bed[, c("SAMPLEID","PROBE",columnLabel,groupingColumnLabel,"FIGURE","ANOMALY","POPULATION","VALUE")])
-
-  return(final_bed)
 
 }
 

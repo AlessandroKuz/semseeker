@@ -1,30 +1,36 @@
-#' init environment
+#' init ssEnvonment
 #'
 #' @param result_folder where result of semseeker will bestored
 #' @param parallel_strategy which strategy to use for parallel executio see future vignete: possibile values, none, multisession,sequential, multicore, cluster
 #' @param maxResources percentage of how many available cores will be used default 90 percent, rounded to the lowest integer
 #' @param ... other options to filter elaborations
 #'
-#' @return the working environment
-init_env <- function(result_folder, maxResources = 90, parallel_strategy = "multisession", ...)
+#' @return the working ssEnvonment
+init_env <- function(result_folder, maxResources = 90, parallel_strategy = "multicore", ...)
 {
 
   # utils::data("PROBES")
   # utils::data("PROBES_CHR_CHR")
   set.seed(7658776)
 
-  #allow export of object of 8gb with future
-  options(future.globals.maxSize= 16 * 1024^3)
+  #allow export of object of 32gb with future
+  options(future.globals.maxSize= 32 * 1024^3)
 
-  ssEnv <- list()
+  ssEnv <- get_session_info(result_folder)
   ssEnv$parallel_strategy <- parallel_strategy
+
+  tmp <- tempdir()
+  ssEnv$temp_folder <-  paste(tmp,"/semseeker/",stringi::stri_rand_strings(1, 7, pattern = "[A-Za-z0-9]"),sep="")
   ssEnv$result_folderData <-  dir_check_and_create(result_folder, "Data")
   ssEnv$result_folderChart <-    dir_check_and_create(result_folder, "Chart")
   ssEnv$result_folderInference <-    dir_check_and_create(result_folder, "Inference")
   ssEnv$result_folderEuristic <-  dir_check_and_create(result_folder,"Euristic")
+  ssEnv$session_folder <-  dir_check_and_create(result_folder,c("Log"))
   random_file_name <- paste(stringi::stri_rand_strings(1, 7, pattern = "[A-Za-z0-9]"),".log", sep="")
 
-  ssEnv$logFolder <-  dir_check_and_create(result_folder,c("log"))
+  if (sink.number() != 0)
+    sink(NULL)
+  sink(file.path(ssEnv$session_folder,"session_output.log"), split = TRUE)
 
   foreachIndex <- 0
 
@@ -39,7 +45,7 @@ init_env <- function(result_folder, maxResources = 90, parallel_strategy = "mult
     nCore <- if(floor(future::availableCores() * maxResources/100 ) > nCore ) nCore else floor(future::availableCores() * maxResources/100 )
   }
   # bootstrap cluster
-  outFile <- file.path(ssEnv$logFolder, "cluster_r.out")
+  outFile <- file.path(ssEnv$session_folder, "cluster_r.out")
 
   options(doFuture.foreach.export = ".export-and-automatic-with-warning")
   doFuture::registerDoFuture()
@@ -60,7 +66,7 @@ init_env <- function(result_folder, maxResources = 90, parallel_strategy = "mult
   ssEnv$showprogress <- FALSE
   if(!is.null(arguments[["showprogress"]]))
   {
-    ssEnv$showprogress <- if(is.null(arguments[["showprogress"]])) ssEnv$keys_figures_default[,1] else arguments$showprogress
+    ssEnv$showprogress <- if(is.null(arguments[["showprogress"]])) keys_figures_default[,1] else arguments$showprogress
   }
 
   # TODO: improve planning parallel management using also cluster
@@ -77,7 +83,7 @@ init_env <- function(result_folder, maxResources = 90, parallel_strategy = "mult
   if(parallel_strategy=="cluster")
   {
     message ("ERROR: ", Sys.time(), " Cluster feature not implemented!")
-    stop()
+    stop("I'm STOPPING HERE!")
     future::plan( future::cluster, workers = nCore)
   }
   if(parallel_strategy!="multisession" & parallel_strategy!="multicore"
@@ -87,208 +93,161 @@ init_env <- function(result_folder, maxResources = 90, parallel_strategy = "mult
     message("INFO: ", Sys.time(), " I will work in sequential mode")
   }
 
-  ssEnv$keys_figures_default <-  data.frame("FIGURE"=c("HYPO", "HYPER", "BOTH"))
-  ssEnv$keys_anomalies_default <-  data.frame("ANOMALY"=c("MUTATIONS","LESIONS","DELTAS","DELTAQ"))
-  ssEnv$keys_metaareas_default <- data.frame("METAAREA"=c("GENE","ISLAND","DMR","CHR","PROBE"))
-  # ,"PROBE"
-
-  figures <- if(is.null(arguments[["figures"]])) ssEnv$keys_figures_default[,1] else arguments$figures
-  anomalies <- if(is.null(arguments[["anomalies"]]))  ssEnv$keys_anomalies_default[,1] else arguments$anomalies
-  metaareas <- if(is.null(arguments[["metaareas"]]))  ssEnv$keys_metaareas_default[,1] else arguments$metaareas
-
-  if(sum(figures %in% ssEnv$keys_figures_default[,1])==0)
+  ssEnvTemp <- get_session_info(result_folder)
+  if (!is.null(ssEnvTemp) & !length(ssEnvTemp)<2)
   {
-    message("INFO: ", Sys.time(), " The only allowed figures values are:", ssEnv$keys_figures_default)
-    stop()
-  }
-  if(sum(anomalies %in% ssEnv$keys_anomalies_default[,1])==0)
-  {
-    message("INFO: ", Sys.time(), " The only allowed anomalies values are:", ssEnv$keys_anomalies_default)
-    stop()
-  }
-  if(sum(metaareas %in% ssEnv$keys_metaareas_default[,1])==0)
-  {
-    message("INFO: ", Sys.time(), " The only allowed areas values are:", ssEnv$keys_metaareas_default)
-    stop()
+    # we had to return aold session info this init could be calles by other than semseeker function, it means
+    # we don't know which marker or figure were calculated
+    message("Reusing old session info !")
+    message("INFO: ", Sys.time(), " I will focus on: ", paste(unique(ssEnvTemp$keys_markers_figures[,"MARKER"]), collapse = " ", sep =" "), " due to ",
+      paste(unique(ssEnvTemp$keys_markers_figures[,"FIGURE"]), collapse = " ", sep =" "),
+      " of ",  paste(unique(ssEnvTemp$keys_areas_subareas[,"AREA"]), collapse = " ", sep =" "),
+      " for ",  paste(unique(ssEnvTemp$keys_areas_subareas[,"SUBAREA"]), collapse = " ", sep =" "))
+    if(dir.exists(ssEnv$session_folder))
+    {
+      update_session_info(ssEnvTemp)
+      return(ssEnvTemp)
+    }
   }
 
-  message("INFO: ", Sys.time(), " I will focus on:", paste(anomalies, collapse = " ", sep =" "), " due to ",  paste(figures, collapse = " ", sep =" "), " of ",  paste(metaareas, collapse = " ", sep =" "))
+  # set default values
+  keys_figures_default <-  data.frame("FIGURE"=c("HYPO", "HYPER", "BOTH"))
+  keys_markers_default <-  data.frame("MARKER"=c("MUTATIONS","LESIONS","DELTAS","DELTAQ","DELTAR","DELTARQ","BETA"))
+  keys_markers_default$EXT <-  c("bed","bed","bedgraph","bed","bedgraph","bed","bedgraph")
+  keys_areas_default <- data.frame("areas"=c("GENE","ISLAND","DMR","CHR","PROBE"))
+  keys_gene_subareas_default <- data.frame("subarea"=c("BODY","TSS1500","TSS200","1STEXON","3UTR","5UTR","EXONBND","WHOLE"))
+  keys_island_subareas_default <- data.frame("subarea"=c("N_SHORE","S_SHORE","N_SHELF","S_SHELF", "WHOLE"))
+  ssEnv$keys_sample_groups <-  data.frame("SAMPLE_GROUP"=c("Reference","Control","Case"))
 
-  ssEnv$gene_subareas <- data.frame("subarea"=c("Body","TSS1500","5UTR","TSS200","1stExon","3UTR","5UTR","ExonBnd","Whole"))
-  ssEnv$island_subareas <- data.frame("subarea"=c("N_Shore","S_Shore","N_Shelf","S_Shelf","Island", "Whole"))
+  # filter selected figures, anoamlies and areas passed by user
+  figures <- if(is.null(arguments[["figures"]])) keys_figures_default[,1] else arguments$figures
+  markers <- if(is.null(arguments[["markers"]]))  keys_markers_default[,1] else arguments$markers
 
-  if(!is.null(arguments[["metaareassub"]]))
+  areas <- if(is.null(arguments[["areas"]]))  keys_areas_default[,1] else arguments$areas
+
+  # check parameters passed by user left areas, figures and anomnalies to work on
+  if(sum(figures %in% keys_figures_default[,1])==0)
   {
-    ssEnv$gene_subareas <- as.data.frame(ssEnv$gene_subareas[ssEnv$gene_subareas[,"subarea"]  %in% arguments$metaareassub,])
-    ssEnv$island_subareas <- as.data.frame(ssEnv$island_subareas[ssEnv$island_subareas[,"subarea"] %in% arguments$metaareassub,  ])
+    message("INFO: ", Sys.time(), " The only allowed figures values are:", keys_figures_default)
+    stop("I'm STOPPING HERE!")
+  }
+  if(sum(markers %in% keys_markers_default[,1])==0)
+  {
+    message("INFO: ", Sys.time(), " The only allowed markers values are:", keys_markers_default)
+    stop("I'm STOPPING HERE!")
+  }
+  if(sum(areas %in% keys_areas_default[,1])==0)
+  {
+    message("INFO: ", Sys.time(), " The only allowed areas values are:", keys_areas_default)
+    stop("I'm STOPPING HERE!")
   }
 
-  ssEnv$keys_populations <-  data.frame("POPULATION"=c("Reference","Control","Case"))
-  ssEnv$keys_figures <-  data.frame("FIGURE"=figures)
-  ssEnv$keys_anomalies <-  data.frame("ANOMALY"=anomalies)
-  ssEnv$keys_metaareas <- data.frame("METAAREA"=metaareas)
+  message("INFO: ", Sys.time(), " I will focus on:", paste(markers, collapse = " ", sep =" "), " due to ",  paste(figures, collapse = " ", sep =" "), " of ",  paste(areas, collapse = " ", sep =" "))
 
-  if("ISLAND" %in% metaareas)
-    ssEnv$keys_areas_island <-  expand.grid("GROUP"="ISLAND",
-                                            "SUBGROUP"=ssEnv$island_subareas[,1]
-    )
-  else
+  if(!is.null(arguments[["subareas"]]))
   {
-    ssEnv$keys_areas_island <-  expand.grid("GROUP"="ISLAND","SUBGROUP"="")[-1,]
+    keys_gene_subareas_default <- as.data.frame(keys_gene_subareas_default[keys_gene_subareas_default[,"subarea"]  %in% arguments$subareas,])
+    keys_island_subareas_default <- as.data.frame(keys_island_subareas_default[keys_island_subareas_default[,"subarea"] %in% arguments$subareas,])
+    if(sum(arguments$subareas %in% c(keys_gene_subareas_default[,1],keys_island_subareas_default))==0)
+    {
+      message("INFO: ", Sys.time(), " The only allowed areas values are:", keys_areas_default)
+      stop("I'm STOPPING HERE!")
+    }
   }
 
-  if("GENE" %in% metaareas)
-    ssEnv$keys_areas_gene <- expand.grid("GROUP"="GENE",
-                                       "SUBGROUP"=ssEnv$gene_subareas[,1]
-    )
-  else
+  # set working on figures, marker, areas and subareas
+  keys_figures <-  data.frame("FIGURE"=figures)
+  keys_markers <-  data.frame("MARKER"=markers)
+  keys_markers_figures <-  expand.grid("MARKER"=keys_markers[,1],"FIGURE"=keys_figures[,1])
+
+  # create markers figures to work on, cleaning also for BETA only MEAN
+  ssEnv$keys_markers_figures <- keys_markers_figures
+  levels(ssEnv$keys_markers_figures$FIGURE) <- c(levels(ssEnv$keys_markers_figures$FIGURE),"MEAN")
+  ssEnv$keys_markers_figures[ssEnv$keys_markers_figures$MARKER=="BETA","FIGURE"] <- "MEAN"
+  ssEnv$keys_markers_figures <- unique(ssEnv$keys_markers_figures)
+  ssEnv$keys_markers_figures$COMBINED <- paste0(c(ssEnv$keys_markers_figures$MARKER,ssEnv$keys_markers_figures$FIGURE), collapse ="_")
+
+  keys_areas <- data.frame("AREA"=areas)
+
+  keys_areas_subareas <- data.frame("AREA"="","SUBAREA"="","COMBINED"="")
+  keys_areas_subareas <- keys_areas_subareas[-1,]
+  ssEnv$keys_areas_subareas_markers_figures <- data.frame("AREA"="","SUBAREA"="","MARKER"="","FIGURE"="")
+  ssEnv$keys_areas_subareas_markers_figures <- ssEnv$keys_areas_subareas_markers_figures[-1,]
+
+  if("ISLAND" %in% areas)
   {
-    ssEnv$keys_areas_gene <- expand.grid("GROUP"="GENE","SUBGROUP"="")[-1,]
+    keys_areas_subareas <-  rbind(keys_areas_subareas,expand.grid("AREA"="ISLAND","SUBAREA"=keys_island_subareas_default[,1], "COMBINED"=""))
+    ssEnv$keys_areas_subareas_markers_figures <- rbind(ssEnv$keys_areas_subareas_markers_figures,expand.grid("AREA"="ISLAND","SUBAREA"= keys_island_subareas_default[,1],"MARKER"=markers,"FIGURE"=figures))
+    message("INFO: ", Sys.time(), " These island's areas will be investigated:", paste(keys_island_subareas_default[,1], collapse = " ", sep=" "))
   }
 
-  ssEnv$keys_areas_dmr <- expand.grid("GROUP"="DMR","SUBGROUP"="DMR")
-  if (!("DMR" %in% metaareas))
-    ssEnv$keys_areas_dmr <- ssEnv$keys_areas_dmr[-1,]
-
-  ssEnv$keys_areas_chr <- expand.grid("GROUP"="CHR","SUBGROUP"="CHR")
-  if (!("CHR" %in% metaareas))
-    ssEnv$keys_areas_chr <- ssEnv$keys_areas_chr[-1,]
-
-  ssEnv$keys_areas_probe <- expand.grid("GROUP"="PROBE","SUBGROUP"="PROBE")
-  if(!("PROBE" %in% metaareas))
-    ssEnv$keys_areas_probe <-  ssEnv$keys_areas_probe[-1,]
-
-  ssEnv$keys_anomalies_figures_areas <- rbind(
-    expand.grid("GROUP"="CHR",
-                "SUBGROUP"="CHR",
-                "FIGURE"=figures,
-                "ANOMALY"=anomalies),
-    expand.grid("GROUP"="PROBE",
-                "SUBGROUP"="PROBE",
-                "FIGURE"=figures,
-                "ANOMALY"=anomalies),
-    expand.grid("GROUP"="DMR",
-                "SUBGROUP"="DMR",
-                "FIGURE"=figures,
-                "ANOMALY"=anomalies),
-    expand.grid("GROUP"="GENE",
-                "SUBGROUP"= ssEnv$gene_subareas[,1],
-                "FIGURE"=figures,
-                "ANOMALY"=anomalies),
-    expand.grid("GROUP"="ISLAND",
-                "SUBGROUP"= ssEnv$island_subareas[,1],
-                "FIGURE"=figures,
-                "ANOMALY"=anomalies)
-  )
-
-  # remove anomaies if metaareas not in options
-  ssEnv$keys_anomalies_figures_areas <- ssEnv$keys_anomalies_figures_areas[ ssEnv$keys_anomalies_figures_areas$GROUP %in% metaareas, ]
-
-  ssEnv$keys <-  expand.grid("figures"=ssEnv$keys_figures[,1],"anomalies"=ssEnv$keys_anomalies[,1])
-
-  if(nrow(ssEnv$keys_areas_probe)>0)
+  if("GENE" %in% areas)
   {
-    probes_subGroups <- ""
-    probes_Prefix <- "PROBES"
-    probes_MainGroupLabel <-  "PROBE"
-    probes_SubGroupLabel <- "GROUP"
-  }
-  else
-  {
-    probes_subGroups <- NULL
-    probes_Prefix <- NULL
-    probes_MainGroupLabel <-  NULL
-    probes_SubGroupLabel <- NULL
+    keys_areas_subareas <- rbind(keys_areas_subareas,expand.grid("AREA"="GENE","SUBAREA"=keys_gene_subareas_default[,1], "COMBINED"=""))
+    ssEnv$keys_areas_subareas_markers_figures <- rbind(ssEnv$keys_areas_subareas_markers_figures,expand.grid("AREA"="GENE","SUBAREA"= keys_gene_subareas_default[,1],"MARKER"=markers,"FIGURE"=figures))
+    message("INFO: ", Sys.time(), " These gene's areas will be investigated:", paste(keys_gene_subareas_default[,1], collapse = " ", sep=" "))
   }
 
-  ssEnv$keys_probe_probes <-  expand.grid("prefix"=probes_Prefix,"maingrouplable"= probes_MainGroupLabel,"subgrouplable"= probes_SubGroupLabel,"subgroups"= probes_subGroups)
-
-  if(nrow(ssEnv$keys_areas_chr)>0)
+  if ("DMR" %in% areas)
   {
-    probes_subGroups <- "CHR"
-    probes_Prefix <- "PROBES_CHR_"
-    probes_MainGroupLabel <-  "CHR"
-    probes_SubGroupLabel <- "GROUP"
-  }
-  else
-  {
-    probes_subGroups <- NULL
-    probes_Prefix <- NULL
-    probes_MainGroupLabel <-  NULL
-    probes_SubGroupLabel <- NULL
+    keys_areas_subareas <- rbind( data.frame("AREA"="DMR","SUBAREA"="WHOLE", "COMBINED"="DMR_WHOLE"), keys_areas_subareas)
+    ssEnv$keys_areas_subareas_markers_figures <- rbind(ssEnv$keys_areas_subareas_markers_figures,expand.grid("AREA"="DMR","SUBAREA"="WHOLE","MARKER"=markers,"FIGURE"=figures))
   }
 
-  ssEnv$keys_chr_probes <-  expand.grid("prefix"=probes_Prefix,"maingrouplable"= probes_MainGroupLabel,"subgrouplable"= probes_SubGroupLabel,"subgroups"= probes_subGroups)
-
-  if(nrow(ssEnv$keys_areas_gene)>0)
+  if ("CHR" %in% areas)
   {
-    probes_subGroups <- ssEnv$gene_subareas[,1]
-    probes_Prefix <- "PROBES_Gene_"
-    probes_MainGroupLabel <-  "GENE"
-    probes_SubGroupLabel <- "GROUP"
-  }
-  else
-  {
-    probes_subGroups <- NULL
-    probes_Prefix <- NULL
-    probes_MainGroupLabel <-  NULL
-    probes_SubGroupLabel <- NULL
+    keys_areas_subareas <- rbind( data.frame("AREA"="CHR","SUBAREA"="WHOLE", "COMBINED"="CHR_WHOLE"), keys_areas_subareas)
+    ssEnv$keys_areas_subareas_markers_figures <- rbind(ssEnv$keys_areas_subareas_markers_figures,expand.grid("AREA"="CHR","SUBAREA"="WHOLE" ,"MARKER"=markers,"FIGURE"=figures))
   }
 
-  ssEnv$keys_gene_probes <-  expand.grid("prefix"=probes_Prefix,"maingrouplable"= probes_MainGroupLabel,"subgrouplable"= probes_SubGroupLabel,"subgroups"= probes_subGroups)
-  # probes <-  expand.grid("prefix"=probes_Prefix,"maingrouplable"= probes_MainGroupLabel,"subgrouplable"= probes_SubGroupLabel,"subgroups"= probes_subGroups)
-
-  # probes.27k
-  # probes.450k
-  # probes.850k
-
-  if(nrow(ssEnv$keys_areas_island)>0)
+  if("PROBE" %in% areas)
   {
-    probes_Prefix <- "PROBES_Island_"
-    probes_subGroups <- ssEnv$island_subareas[,1]
-    probes_MainGroupLabel <- "ISLAND"
-    probes_SubGroupLabel <- "RELATION_TO_CPGISLAND"
+    keys_areas_subareas <- rbind( data.frame("AREA"="PROBE","SUBAREA"="WHOLE", "COMBINED"="PROBE_WHOLE"), keys_areas_subareas)
+    ssEnv$keys_areas_subareas_markers_figures <- rbind(ssEnv$keys_areas_subareas_markers_figures,expand.grid("AREA"="PROBE","SUBAREA"="WHOLE" ,"MARKER"=markers,"FIGURE"=figures))
   }
-  else
-  {
-    probes_subGroups <- NULL
-    probes_Prefix <- NULL
-    probes_MainGroupLabel <-  NULL
-    probes_SubGroupLabel <- NULL
-  }
-  ssEnv$keys_island_probes <-  expand.grid("prefix"=probes_Prefix,"maingrouplable"= probes_MainGroupLabel,"subgrouplable"= probes_SubGroupLabel,"subgroups"= probes_subGroups)
-  # probes <-  rbind(expand.grid("prefix"=probes_Prefix,"maingrouplable"= probes_MainGroupLabel,"subgrouplable"= probes_SubGroupLabel,"subgroups"= probes_subGroups), probes)
 
-  if(nrow(ssEnv$keys_areas_dmr)>0)
+  combine_not_empty <- function(x)
   {
-    probes_subGroups <- c("DMR")
-    probes_Prefix <- "PROBES_DMR_"
-    probes_MainGroupLabel <-  "DMR"
-    probes_SubGroupLabel <- "GROUP"
+    paste0(x[x!=""], collapse = "_")
   }
-  else
-  {
-    probes_subGroups <- NULL
-    probes_Prefix <- NULL
-    probes_MainGroupLabel <-  NULL
-    probes_SubGroupLabel <- NULL
-  }
-  ssEnv$keys_dmr_probes <-  expand.grid("prefix"=probes_Prefix,"maingrouplable"= probes_MainGroupLabel,"subgrouplable"= probes_SubGroupLabel,"subgroups"= probes_subGroups)
 
-  # probes <-  rbind( ssEnv$keys_island_probes, ssEnv$keys_gene_probes, ssEnv$keys_dmr_probes )
+  # force the only FIGURE of BETA as MEAN
+  levels(ssEnv$keys_areas_subareas_markers_figures$FIGURE) <- c( levels(ssEnv$keys_areas_subareas_markers_figures$FIGURE),"MEAN")
+  ssEnv$keys_areas_subareas_markers_figures$FIGURE[ssEnv$keys_areas_subareas_markers_figures$MARKER=="BETA"] <-"MEAN"
+  ssEnv$keys_areas_subareas_markers_figures <- unique(ssEnv$keys_areas_subareas_markers_figures)
+  ssEnv$keys_areas_subareas_markers_figures$COMBINED <- apply(ssEnv$keys_areas_subareas_markers_figures[,c("MARKER","FIGURE","AREA","SUBAREA")], 1, combine_not_empty )
 
-  ssEnv$functionToExport <- c( "analyze_single_sample",
+  ssEnv$keys_areas_subareas <- keys_areas_subareas
+  ssEnv$keys_areas_subareas$COMBINED <- apply(ssEnv$keys_areas_subareas[,c("AREA","SUBAREA")], 1, combine_not_empty )
+
+  # force the only FIGURE of BETA as MEAN
+  ssEnv$keys_markers_figures <- keys_markers_figures
+  ssEnv$keys_markers_figures <- merge(ssEnv$keys_markers_figures,keys_markers_default, by="MARKER")
+  levels(ssEnv$keys_markers_figures$FIGURE) <- c( levels(ssEnv$keys_markers_figures$FIGURE),"MEAN")
+  ssEnv$keys_markers_figures[ssEnv$keys_markers_figures$MARKER=="BETA","FIGURE"] <- "MEAN"
+  ssEnv$keys_markers_figures$COMBINED <- apply(ssEnv$keys_markers_figures[,c("MARKER","FIGURE")], 1, combine_not_empty )
+
+  ssEnv$keys_areas <- unique(ssEnv$keys_areas_subareas_markers_figures[,"AREA"])
+
+  ssEnv$functionToExport <- c( "analyze_single_sample","deltar_single_sample",
                                "dump_sample_as_bed_file", "delta_single_sample","dir_check_and_create",
                                "file_path_build","analyze_single_sample_both",
                                "sort_by_chr_and_start", "test_match_order", "lesions_get",
-                               "mutations_get","PROBES_Gene_3UTR", "PROBES_Gene_5UTR","PROBES_DMR_DMR","PROBES_Gene_Body")
+                               "mutations_get")
 
 
   # to manage progress bar
   if(ssEnv$showprogress)
   {
-    progressr::handlers(global = TRUE)
-    progressr::handlers("progress")
+    handler_settings <- progressr::handlers()
+    if ((exists("progress", mode = "function", inherits = TRUE)))
+    {
+      progressr::handlers(global = TRUE)
+      progressr::handlers("progress")
+    }
   }
+
+  update_session_info(ssEnv)
+
   return(ssEnv)
 }
